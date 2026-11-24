@@ -21,6 +21,7 @@ Versions below are the ranges declared in `package.json`, not a report of the ex
 | `react` | `^18.3.1` | UI components |
 | `react-dom` | `^18.3.1` | Browser rendering |
 | `react-router-dom` | `^7.18.4` | Browser routing and navigation hooks |
+| `@sanity/client` | `^8.17.0` | Headless CMS client fetching live content from Sanity Content Lake |
 | `lucide-react` | `^1.16.0` | Icons in contact, benefits, competition steps, and donate UI |
 | `vite` | `^6.2.0` | Development server and production build |
 | `@vitejs/plugin-react` | `^4.3.4` | React integration for Vite |
@@ -35,6 +36,7 @@ The project uses ES modules (`"type": "module"`) and is marked private in `packa
 ### Third-party services (by name only)
 
 The project connects to or integrates with the following external services:
+- **Sanity**: Headless Content Management System (Project ID `1bo0kk7l`, dataset `production`, API version `2025-01-01`) delivering live content and media via Sanity Content Lake and CDN.
 - **Google Sheets**: Receiving endpoint for Contact modal form submissions via webhook.
 - **Google Fonts**: Web typography stylesheets loaded in `index.html`.
 - **Boxicons / unpkg**: CDN-delivered icon stylesheet loaded in `index.html`.
@@ -73,10 +75,24 @@ There is no test or lint script in `package.json`.
 |   |-- robot.txt                Alternative crawler permissions file
 |   |-- robots.txt               Search crawler permissions and sitemap link
 |   `-- sitemap.xml              Search engine XML sitemap containing core and dynamic profile URLs
+|-- studio-chresthosempowerment-foundation/ Standalone Sanity Studio for content management
+|   |-- import.ndjson            Exported initial content dataset for Sanity Content Lake
+|   |-- package.json             Studio dependencies (Sanity v3, Vision plugin)
+|   |-- sanity.cli.ts            CLI configuration and deployment settings
+|   |-- sanity.config.ts         Studio desk structure, vision tool, and singleton template filters
+|   |-- structure.ts             Custom desk structure with singletons (Teen Star, Testimonial, Contact)
+|   |-- schemaTypes/
+|   |   |-- content.ts           8 schema type definitions (team, partners, gallery, outreach, facts, etc.)
+|   |   `-- index.ts             Schema entry point exporting all registered types
+|   `-- scripts/
+|       `-- make-import.mjs      Conversion script turning homeData.js into import.ndjson
 `-- src/
     |-- App.jsx                  Route declarations, code-splitting, ErrorBoundary, CookieNotice, and scroll behavior
-    |-- main.jsx                 React root and BrowserRouter setup
+    |-- main.jsx                 Pre-mounts Sanity content loader with fallback, mounts React root
     |-- index.css                Global reset, typography defaults, and focus-visible styling
+    |-- lib/                     CMS content loading, GROQ queries, and data mapping
+    |   |-- mapContent.js        Maps raw Sanity responses to homeData shapes and mutates in place
+    |   `-- sanityContent.js     Sanity client, GROQ query, and 4-second timeout loader function
     |-- components/              Reusable page sections, navigation, footer, modals, and global banners
     |   |-- skeleton/            Skeleton screens, shimmer primitives, and delayed fallback wrappers
     |   |-- ContactModal.jsx     Contact details and message submission form
@@ -170,7 +186,7 @@ The table lists the exported UI components, helper components, their props/state
 | `TeamSection`, `src/components/TeamSection.jsx` | Partner and team grids. Used by `HomePage`. | Optional `onSelectMember`; reads `PARTNERS` and `TEAM_MEMBERS`; creates `/team/:slug` links using `slugify`. | `src/components/TeamSection.css` |
 | `CardPattern`, `src/components/TeamSection.jsx` | Internal SVG pattern for profile cards: circles, diamonds, prisms, or default stripes. Used by `TeamSection`. | Props: `pattern` and `id`; no state. | `src/components/TeamSection.css` |
 | `TestimonialsSection`, `src/components/TestimonialsSection.jsx` | Testimonial image, quote, star rating, and author. Used by `HomePage`. | No props. `activeSlide` state and previous/next handlers exist, but arrow markup is commented out and array contains one testimonial. | `src/components/TestimonialsSection.css` |
-| `Footer`, `src/components/Footer.jsx` | Contact details, Teen Star link, brand information, copyright text, Contact button, and direct Privacy Policy link. Used on all pages. | No props. Local state controls `ContactModal`. Reads `CONTACT_INFO`. Links directly to `/privacy-policy`. | `src/components/Footer.css`, `src/components/FooterPrivacyLink.css` |
+| `Footer`, `src/components/Footer.jsx` | Contact details (address, email, phone numbers, and WhatsApp numbers with direct wa.me links), Teen Star link, brand information, social media links, copyright text, Contact button, and direct Privacy Policy link. Used on all pages. | No props. Local state controls `ContactModal`. Reads `CONTACT_INFO` (including `phones` and `whatsapp`). Links directly to `/privacy-policy`. | `src/components/Footer.css`, `src/components/FooterPrivacyLink.css` |
 | `GetInvolvedModal`, `src/components/GetInvolvedModal.jsx` | Volunteer, partner, and donate cards. Used by `HomePage`. | Props: `isOpen`, `onClose`, `onDonateClick`. State switches to `ContactModal` for Volunteer/Partner. Effect handles Escape and body scroll lock. | `src/components/GetInvolvedModal.css` |
 | `ContactModal`, `src/components/ContactModal.jsx` | Contact details and message form. Used by `Footer` and `GetInvolvedModal`. | Props: `isOpen`, `onClose`. State: `status` (`idle`, `sending`, `success`, `error`); ref focuses name input. Effect handles Escape and body scroll lock. Submit posts form data to `VITE_SHEET_URL`. | `src/components/ContactModal.css` |
 | `ProfileModal`, `src/components/ProfileModal.jsx` | Selected member details, photo/logo/fallback, bio, optional external link. Used by `HomePage`. | Props: `member`, `onClose`. Effect handles Escape and body scroll lock. | `src/components/ProfileModal.css` |
@@ -223,10 +239,76 @@ The website implementation manages client-side storage as follows:
 
 ### Updating content
 
-- Update arrays and `CONTACT_INFO` in `src/data/homeData.js` for navigation labels, stats, hero cards, outreach cards, partner/team bios, testimonial fields, gallery images, and footer details.
+- **Via Sanity Content Studio (Recommended)**: Site content (team, partners, gallery photos, outreach videos, impact stats, winner details, testimonials, and contact details) is dynamically managed in Sanity Studio. Run `npm run dev` inside `studio-chresthosempowerment-foundation/` (port `3333`) or access the deployed Studio. Hit **Publish** on any document for changes to take effect on the live website after page refresh.
+- **Via source code**: Update default values in `src/data/homeData.js` for fallback data when offline.
 - Much of the Foundation, Donate, Teen Star, Gallery, Privacy Policy, Contact modal, and Get Involved copy is written directly in the corresponding JSX files. Search those component files to update that text.
-- Images are referenced by `/assets/...` URLs. Place replacement files in `public/assets/` or `public/assets/gallery-images/` and update the corresponding path in `homeData.js` or component JSX.
+- Images are referenced by `/assets/...` URLs by default. Place replacement files in `public/assets/` or `public/assets/gallery-images/` and update the corresponding path in `homeData.js` or component JSX, or upload new images directly via the Sanity Studio.
 - Profile routes are generated from each person's `name` by `src/utils/slugify.js`. Update route links and slug-sensitive code if naming conventions change.
+
+### Sanity CMS Content Architecture
+
+The project integrates a standalone Sanity Content Studio (`studio-chresthosempowerment-foundation/`) configured for Project ID `1bo0kk7l` and dataset `production`.
+
+#### 1. Schema Types (`schemaTypes/content.ts`)
+
+The content model defines 8 document types matching the website's data structures:
+
+| Schema Name | Type | Key Fields | Purpose |
+| --- | --- | --- | --- |
+| `teamMember` | Document | `name`, `role`, `image` (asset upload), `legacyImage`, `pattern`, `isCutout`, `isLogo`, `externalUrl`, `bio` (array of text paragraphs), `order` | Foundation team profiles displayed on Home and Profile pages |
+| `partner` | Document | Same schema as `teamMember` | Partner organization and supporter profiles |
+| `galleryImage` | Document | `image` (asset upload), `legacyImage`, `alt` (description), `order` | Community outreach and event photos rendered in the Gallery page |
+| `outreach` | Document | `video` (YouTube embed URL), `order` | Community outreach video embeds in the Foundation section |
+| `funFact` | Document | `prefix` (e.g. "Over"), `stat` (e.g. "200+"), `label`, `order` | Numerical impact counter cards in the Fun Facts section |
+| `teenStar` | Document (Singleton) | `name`, `title`, `role`, `image` (asset upload), `legacyImage`, `alt` | Winner card on The Next Teen Star stage |
+| `testimonial` | Document (Singleton) | `quote`, `author`, `role`, `image` (asset upload), `legacyImage`, `rating` (1-5) | Supporter quote and rating card in the Testimonials section |
+| `contactInfo` | Document (Singleton) | `address`, `email`, `phones` (string array), `whatsapp` (string array), `website`, `copyright` | Footer and Contact modal information |
+
+#### 2. Desk Structure and Singleton Protection (`structure.ts` & `sanity.config.ts`)
+
+- **Singletons**: `teenStar`, `testimonial`, and `contactInfo` are configured as one-off documents with fixed IDs (`s.id`). The desk structure maps each to a single document pane.
+- **Template filtering**: In `sanity.config.ts`, `schema.templates` filters out singleton types:
+  ```ts
+  templates: (templates) => templates.filter(({schemaType}) => !singletonTypes.includes(schemaType))
+  ```
+  This prevents editors from creating accidental duplicate records in the Studio.
+- **Ordered lists**: Team members, partners, gallery images, outreach videos, and fun facts are listed with default ascending ordering by their `order` numeric field.
+
+#### 3. Content Hydration and Fallback Pipeline (`src/lib/`)
+
+The application loads CMS content during initial bootstrap through a resilient pipeline:
+
+```text
+src/main.jsx
+    │
+    ▼
+loadSanityContent() [src/lib/sanityContent.js]
+    │
+    ├── Fetch GROQ query from Sanity Content Lake via @sanity/client
+    │   (Races against a 4000ms timeout)
+    │
+    ├── Success ──► mapContent(raw, fallback) [src/lib/mapContent.js]
+    │                   │
+    │                   ▼
+    │               applyContent(homeData, mapped)
+    │               (In-place mutation of homeData.js objects & arrays)
+    │
+    └── Error / Timeout (>4s) ──► Log warning and retain built-in homeData.js defaults
+    │
+    ▼
+ReactDOM.createRoot().render(<App />)
+```
+
+- **Image resolution strategy**: The GROQ query uses `coalesce(image.asset->url, legacyImage)`. If a new photo is uploaded in the Studio, its Sanity CDN URL is served; otherwise, the site continues to serve the original local file from `public/assets/`.
+- **In-place mutation (`applyContent`)**: Rather than requiring React context or refactoring existing components, `applyContent` mutates the exported arrays (`splice`) and objects (`Object.assign`) of `src/data/homeData.js` in place before React renders. Components that import `homeData.js` automatically display CMS content with zero component edits.
+- **Resilience and zero-flicker**: `loadSanityContent().finally(...)` runs before React root creation. If Sanity is offline or exceeds 4 seconds, the app gracefully falls back to the static values in `homeData.js`.
+
+#### 4. Publishing and Hosting Requirements
+
+- **Publish workflow**: The GROQ query targets published documents. Draft documents are ignored. Editors must click **Publish** in the Studio for changes to appear on the site.
+- **Content updates**: Edits become visible immediately upon browser refresh without needing a code rebuild or redeployment.
+- **CORS origins**: In `sanity.io/manage` (Project `1bo0kk7l` -> **API** -> **CORS Origins**), `http://localhost:3000`, `http://localhost:5173`, and all production hosting domains must be allowed (credentials: No).
+- **Dataset visibility**: Dataset `production` must remain set to **Public**.
 
 ### Activating "The Next Teen Star" Winner State
 
@@ -324,7 +406,7 @@ Create local configuration using `.env.example` as a template and provide the en
 
 ## 8. Routing, App Flow, and Hosting Requirements
 
-`src/main.jsx` mounts `App` inside React Router's `BrowserRouter`. No app-wide React context or global application state is defined; state is local to pages/components and passed through props.
+At application bootstrap, `src/main.jsx` executes `loadSanityContent()` to fetch published content from Sanity Content Lake and mutate the in-memory records in `src/data/homeData.js` in place. Once settled (or after a 4-second timeout that retains static defaults), it mounts `App` inside React Router's `BrowserRouter`. No app-wide React context or global application state is defined; state is local to pages/components and passed through props.
 
 ### Active routes
 
